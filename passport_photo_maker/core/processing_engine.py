@@ -132,7 +132,7 @@ class ProcessingEngine:
         )
         self._face_detector.initialize()
 
-        self._bg_remover = BackgroundRemover(model_name="u2net")
+        self._bg_remover = BackgroundRemover(model_name="u2net_human_seg")
         self._bg_remover.initialize()
 
         self._cropper = PassportCropper(self.config)
@@ -341,6 +341,7 @@ class ProcessingEngine:
                 image,
                 bg_color=self.config.background_color,
                 refine_edges=True,
+                post_process_mask=False,
             )
 
             if bg_res is None:
