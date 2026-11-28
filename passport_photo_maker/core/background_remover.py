@@ -22,7 +22,7 @@ except ImportError:
 class BackgroundRemover:
     """High-quality background removal and replacement with pure white."""
 
-    def __init__(self, model_name: str = "u2net"):
+    def __init__(self, model_name: str = "u2net_human_seg"):
         """
         Initialize background remover.
 
@@ -63,7 +63,7 @@ class BackgroundRemover:
         image: np.ndarray,
         bg_color: Tuple[int, int, int] = (255, 255, 255),
         refine_edges: bool = True,
-        post_process_mask: bool = True,
+        post_process_mask: bool = False,
     ) -> Optional[np.ndarray]:
         """
         Remove background and replace with solid color.
@@ -85,7 +85,7 @@ class BackgroundRemover:
         image: np.ndarray,
         bg_color: Tuple[int, int, int] = (255, 255, 255),
         refine_edges: bool = True,
-        post_process_mask: bool = True,
+        post_process_mask: bool = False,
     ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         """
         Remove background and return (composited_bgr, alpha_mask_float32).
@@ -131,6 +131,9 @@ class BackgroundRemover:
             if scale < 1.0:
                 alpha = cv2.resize(alpha, (w, h), interpolation=cv2.INTER_LINEAR)
 
+            # Fill enclosed holes inside the foreground (e.g. white shirt panels)
+            alpha = self._fill_interior_holes(alpha)
+
             # Refine edges with OpenCV
             if refine_edges:
                 alpha = self._refine_edges(alpha)
@@ -150,6 +153,20 @@ class BackgroundRemover:
             self.last_error = str(e)
             logger.error(f"Background removal failed: {e}", exc_info=True)
             return None
+
+    def _fill_interior_holes(self, alpha: np.ndarray) -> np.ndarray:
+        """Fill enclosed holes inside the foreground mask (e.g. white clothing panels)."""
+        mask = (alpha > 0.5).astype(np.uint8)
+        h, w = mask.shape
+        ff = mask.copy()
+        flood_mask = np.zeros((h + 2, w + 2), np.uint8)
+        for seed in ((0, 0), (w - 1, 0)):
+            if ff[seed[1], seed[0]] == 0:
+                cv2.floodFill(ff, flood_mask, seed, 2)
+        holes = ff == 0
+        if np.any(holes):
+            alpha = np.where(holes, 1.0, alpha).astype(np.float32)
+        return alpha
 
     def _refine_edges(self, alpha: np.ndarray) -> np.ndarray:
         """Refine alpha mask edges for smooth, natural hair and clothing cutouts."""
@@ -210,7 +227,7 @@ class BackgroundRemover:
         return np.clip(result, 0, 255).astype(np.uint8)
 
     def get_alpha_mask(
-        self, image: np.ndarray, post_process_mask: bool = True
+        self, image: np.ndarray, post_process_mask: bool = False
     ) -> Optional[np.ndarray]:
         """Get just the alpha mask without compositing."""
         res = self.remove_background_with_mask(
